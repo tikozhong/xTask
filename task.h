@@ -8,8 +8,8 @@ filename: task.h
 #include "misc.h"
 
 /* output variables for extern function --------------------------------------*/
-extern void taskIrq(void);			//put in 1ms irq callback
-extern void taskPolling(void);	//put in main loop
+void taskIrq(void);			//put in 1ms irq callback
+void taskPolling(void);	//put in main loop
 
 #endif
 

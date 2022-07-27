@@ -10,17 +10,12 @@
 *******************************************************************************/
 /* Includes ------------------------------------------------------------------*/
 #include "task.h"
-
-#include "stdarg.h"
-#include "string.h"
+#include <stdarg.h>
+#include <string.h>
 #include <ctype.h>
-#include "stdlib.h"
-#include "stdio.h"
-
+#include <stdlib.h>
+#include <stdio.h>
 #include "board.h"
-#include "wlun.h"
-
-#include "httpServer.h"
 
 /* Public variables ---------------------------------------------------------*/
 /* Private typedef -----------------------------------------------------------*/
@@ -37,14 +32,14 @@
 
 /* Private function prototypes -----------------------------------------------*/
 static u16 tickRT4,tick4,tick8,tick16,tick32,tick64,tick128;
-void taskRT4(void);
+static void taskRT4(void);
 static void task0(void);
-void task4(void);
-void task8(void);
-void task16(void);
-void task32(void);
-void task64(void);
-void task128(void);
+static void task4(void);
+static void task8(void);
+static void task16(void);
+static void task32(void);
+static void task64(void);
+static void task128(void);
 
 void taskIrq(void){
 	if((++tickRT4&0x03) == 0)	taskRT4();
@@ -61,6 +56,7 @@ void taskIrq(void){
   * @retval None
   */
 void taskPolling(void){
+	if(initalDone == 0)	return;
 	task0();
 	if(tick4>=4)		{task4();tick4 = 0;}
 	if(tick8>=8)		{task8();tick8 = 0;}
@@ -85,7 +81,7 @@ static void task0(void){
   * @param none
   * @retval None
   */
-void taskRT4(void){
+static void taskRT4(void){
 }
 
 /**
@@ -93,8 +89,7 @@ void taskRT4(void){
   * @param none
   * @retval None
   */
-void task4(void){
-	netDev.loop(&netDev.rsrc, 4);
+static void task4(void){
 	console.RxPolling(&console.rsrc);
 	rs485.RxPolling(&rs485.rsrc);
 }
@@ -104,8 +99,7 @@ void task4(void){
   * @param none
   * @retval None
   */
-void task8(void){
-
+static void task8(void){
 }
 
 /**
@@ -113,64 +107,86 @@ void task8(void){
   * @param none
   * @retval None
   */
-void task16(void)
-{
-	u32 i,j,x,len;
-	char buff[MAX_CMD_LEN] = {0};
-	char *CMD;	
-	s32 argv[16];
-
-	//message from uart
-	if(console.RxFetchLine(&console.rsrc, buff, MAX_CMD_LEN)){
-		for(i=0;i<MAX_CMD_LEN;i++){
-			if(buff[i] == 0)	break;
-			if(buff[i] == '(' || buff[i] == ')' || buff[i] == ',')	buff[i] = ' ';
-			if(buff[i] >= 'A' && buff[i] <= 'Z')	buff[i] += 32;
-		}
-		// common command
-		if(strncmp(buff, "about ", strlen("about ")) == 0){
-			print("+ok@%d.about(\"%s\")\r\n", boardAddr, ABOUT);
-		}
-		else if(strncmp(buff, "help ", strlen("help ")) == 0){
-			printS(COMMON_HELP);
-			print("+ok@%d.help()\r\n", boardAddr);
-		}
-		else if(strncmp(buff, addrPre, strlen(addrPre)) == 0){
-			CMD = buff+strlen(addrPre);
-			if(brdCmd(CMD, boardAddr, printS, print)){	}
-			else{		print("+unknown@%s", buff);	}
-		}
-		else{	printS485(buff);	}
+static void commandFormat(char* buff, u16 len){
+	u16 i;
+	for(i=0;i<len;i++){
+		if(buff[i] == 0)	break;
+		if(buff[i] == '(' || buff[i] == ')' || buff[i] == ',')	buff[i] = ' ';
+		if(buff[i] >= 'A' && buff[i] <= 'Z')	buff[i] += 32;
 	}
-	//message from rs485
-	len = rs485.RxFetchFrame(&rs485.rsrc, (u8*)buff, MAX_CMD_LEN);
-	if(len>0){
-		copyToWlun(buff);
-		if(strncmp(buff, addrPre, strlen(addrPre)) == 0){	//match board address
-			CMD = buff+strlen(addrPre);
-			if(brdCmd(CMD, boardAddr, printS485, print485)){	}
-			else{	print485("+unknown@%s", buff);	}
-		}
-		else{
-			printS(buff);	
-			//handler_tcps->send(&handler_tcps->rsrc, (u8*)buff, strlen(buff));
-		};
-	}
-//	if(wlunUsing == 92)	// for beckoff polling
-//		wlunPolling(16);
-	
-//	for(i = 0; i < MAX_HTTPSOCK; i++)	httpServer_run(i);	// HTTP server handler
-	
 }
 
-//FF-U674-1
+static u8 doCommand(char* buff, u16 len,
+		void (*xprintS)(const char* MSG),
+		void (*xprint)(const char* FORMAT_ORG, ...),
+		void (*forward)(const char* MSG)){
+	s32 i;
+	char *CMD;
+	if(buff==NULL)	return 0;
+	//message from uart
+	if(sscanf(buff, "%d.", &i)<=0){
+		if(strncmp(buff, "help", strlen("help")) == 0){
+			printHelp(boardAddr,xprint);
+		}
+		else if(strncmp(buff, "about", strlen("about")) == 0){
+			xprint("+ok@about(%d,\"%s\")\r\n", boardAddr, ABOUT);
+		}
+		else{
+			xprint("+unknown@%s", buff);
+		}
+	}
+	else if(sscanf(buff, "%d.", &i)==1){
+		if(i == boardAddr){
+			commandFormat(buff, len);
+			CMD = (char*)buff + strlen(addrPre);
+			if(brdCmd(CMD, boardAddr, xprint)){	}
+			else if(inputCmd(&inputDev, CMD, boardAddr, xprint)){	}
+			else if(outputCmd(&outputDev, CMD, boardAddr, xprint)){	}
+			else{		xprint("+unknown@%s", buff);	}
+		}
+		else{
+			if(forward){
+				forward((char*)buff);
+			}
+		}
+	}
+	return 1;
+}
+
+#define MAX_LINE_LEN	MAX_CMD_LEN
+static void task16(void)
+{
+	u32 len;
+	char buff[MAX_LINE_LEN] = {0};
+	char *CMD;
+
+	HAL_IWDG_Refresh(&hiwdg);
+	//message from uart
+	if(fetchLineFromRingBuffer(&console.rsrc.rxRB, (char*)buff, MAX_LINE_LEN)){
+		doCommand(buff, MAX_LINE_LEN, printS, print, printS485);
+	}
+
+	//message from rs485
+	memset(buff,0,MAX_LINE_LEN);
+	len = rs485.RxFetchFrame(&rs485.rsrc, (u8*)buff, MAX_LINE_LEN);
+	if(len>0){
+		if(buff[0] == '+'){
+			printS(buff);	// message begins with '+', it means message is from bus
+		}
+		else{
+			doCommand(buff, MAX_LINE_LEN, printS485, print485, NULL);
+		}
+	}
+
+	inputDev.Polling(&inputDev.rsrc, 16);
+}
 
 /**
   * @brief task per 32ms
   * @param none
   * @retval none
   */
-void task32(void){
+static void task32(void){
 }
 
 /**
@@ -178,8 +194,7 @@ void task32(void){
   * @param none
   * @retval None
   */
-void task64(void)
-{
+static void task64(void){
 }
 
 /**
@@ -187,7 +202,7 @@ void task64(void)
   * @param none
   * @retval None
   */
-void task128(void){
+static void task128(void){
 	HAL_GPIO_TogglePin(RUNNING.GPIOx, RUNNING.GPIO_Pin);
 }
 
