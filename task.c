@@ -16,7 +16,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "board.h"
-
+#include "inputCmd.h"
+#include "outputCmd.h"
+#include "tmcCmd.h"
 /* Public variables ---------------------------------------------------------*/
 /* Private typedef -----------------------------------------------------------*/
 
@@ -90,6 +92,7 @@ static void taskRT4(void){
   * @retval None
   */
 static void task4(void){
+	//tmc5160.periodicJob(&tmc5160.rsrc, 4);
 	console.RxPolling(&console.rsrc);
 	rs485.RxPolling(&rs485.rsrc);
 }
@@ -117,7 +120,6 @@ static void commandFormat(char* buff, u16 len){
 }
 
 static u8 doCommand(char* buff, u16 len,
-		void (*xprintS)(const char* MSG),
 		void (*xprint)(const char* FORMAT_ORG, ...),
 		void (*forward)(const char* MSG)){
 	s32 i;
@@ -140,8 +142,9 @@ static u8 doCommand(char* buff, u16 len,
 			commandFormat(buff, len);
 			CMD = (char*)buff + strlen(addrPre);
 			if(brdCmd(CMD, boardAddr, xprint)){	}
-			else if(inputCmd(&inputDev, CMD, boardAddr, xprint)){	}
+			else if(inputCmd(&inputDev, CMD, boardAddr, xprint)){ }
 			else if(outputCmd(&outputDev, CMD, boardAddr, xprint)){	}
+			else if(tmcCmd(&tmc5160, CMD, boardAddr, xprint)){ }
 			else{		xprint("+unknown@%s", buff);	}
 		}
 		else{
@@ -158,23 +161,23 @@ static void task16(void)
 {
 	u32 len;
 	char buff[MAX_LINE_LEN] = {0};
-	char *CMD;
 
 	HAL_IWDG_Refresh(&hiwdg);
 	//message from uart
 	if(fetchLineFromRingBuffer(&console.rsrc.rxRB, (char*)buff, MAX_LINE_LEN)){
-		doCommand(buff, MAX_LINE_LEN, printS, print, printS485);
+		doCommand(buff, MAX_LINE_LEN, print, printS485);
 	}
 
 	//message from rs485
 	memset(buff,0,MAX_LINE_LEN);
 	len = rs485.RxFetchFrame(&rs485.rsrc, (u8*)buff, MAX_LINE_LEN);
 	if(len>0){
+		print("485.raw:%s", buff);
 		if(buff[0] == '+'){
 			printS(buff);	// message begins with '+', it means message is from bus
 		}
 		else{
-			doCommand(buff, MAX_LINE_LEN, printS485, print485, NULL);
+			doCommand(buff, MAX_LINE_LEN, print485, NULL);
 		}
 	}
 
