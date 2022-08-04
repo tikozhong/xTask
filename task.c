@@ -92,7 +92,7 @@ static void taskRT4(void){
   * @retval None
   */
 static void task4(void){
-	//tmc5160.periodicJob(&tmc5160.rsrc, 4);
+	tmc5160.periodicJob(&tmc5160.rsrc, 4);
 	console.RxPolling(&console.rsrc);
 	rs485.RxPolling(&rs485.rsrc);
 }
